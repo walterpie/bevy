@@ -1,6 +1,6 @@
 use super::{
-    CameraNode, PassNode, RenderGraph, SharedBuffersNode, TextureCopyNode, WindowSwapChainNode,
-    WindowTextureNode,
+    CameraNode, ComputeNode, PassNode, RenderGraph, SharedBuffersNode, TextureCopyNode,
+    WindowSwapChainNode, WindowTextureNode,
 };
 use crate::{
     pass::{
@@ -67,6 +67,7 @@ pub mod node {
     pub const MAIN_DEPTH_TEXTURE: &str = "main_pass_depth_texture";
     pub const MAIN_SAMPLED_COLOR_ATTACHMENT: &str = "main_pass_sampled_color_attachment";
     pub const MAIN_PASS: &str = "main_pass";
+    pub const COMPUTE_PASS: &str = "compute_pass";
     pub const SHARED_BUFFERS: &str = "shared_buffers";
 }
 
@@ -126,6 +127,12 @@ impl BaseRenderGraphBuilder for RenderGraph {
                 ),
             );
         }
+
+        self.add_node(node::COMPUTE_PASS, ComputeNode::new());
+        self.add_node_edge(node::TEXTURE_COPY, node::COMPUTE_PASS)
+            .unwrap();
+        self.add_node_edge(node::SHARED_BUFFERS, node::COMPUTE_PASS)
+            .unwrap();
 
         if config.add_main_pass {
             let mut main_pass_node = PassNode::<&MainPass>::new(PassDescriptor {

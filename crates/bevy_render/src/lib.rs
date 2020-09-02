@@ -1,6 +1,7 @@
 pub mod batch;
 pub mod camera;
 pub mod color;
+pub mod dispatch;
 pub mod draw;
 pub mod mesh;
 pub mod pass;
@@ -37,7 +38,8 @@ use camera::{
     ActiveCameras, Camera, OrthographicProjection, PerspectiveProjection, VisibleEntities,
 };
 use pipeline::{
-    DynamicBinding, PipelineCompiler, PipelineDescriptor, PipelineSpecialization,
+    ComputePipelineCompiler, ComputePipelineDescriptor, ComputePipelineSpecialization,
+    ComputePipelines, DynamicBinding, PipelineCompiler, PipelineDescriptor, PipelineSpecialization,
     PrimitiveTopology, ShaderSpecialization, VertexBufferDescriptors,
 };
 use render_graph::{
@@ -46,6 +48,8 @@ use render_graph::{
 };
 use renderer::{AssetRenderResourceBindings, RenderResourceBindings};
 use std::ops::Range;
+
+use dispatch::Dispatch;
 #[cfg(feature = "hdr")]
 use texture::HdrTextureLoader;
 #[cfg(feature = "png")]
@@ -58,6 +62,8 @@ pub mod stage {
     pub static RENDER_RESOURCE: &str = "render_resource";
     /// Stage where Render Graph systems are run. In general you shouldn't add systems to this stage manually.
     pub static RENDER_GRAPH_SYSTEMS: &str = "render_graph_systems";
+    /// Compute stage where compute systems are executed.
+    pub static COMPUTE: &str = "compute";
     // Stage where draw systems are executed. This is generally where Draw components are setup
     pub static DRAW: &str = "draw";
     pub static RENDER: &str = "render";
@@ -91,6 +97,7 @@ impl Plugin for RenderPlugin {
 
         app.add_stage_after(bevy_asset::stage::ASSET_EVENTS, stage::RENDER_RESOURCE)
             .add_stage_after(stage::RENDER_RESOURCE, stage::RENDER_GRAPH_SYSTEMS)
+            .add_stage_after(stage::RENDER_GRAPH_SYSTEMS, stage::COMPUTE)
             .add_stage_after(stage::RENDER_GRAPH_SYSTEMS, stage::DRAW)
             .add_stage_after(stage::DRAW, stage::RENDER)
             .add_stage_after(stage::RENDER, stage::POST_RENDER)
@@ -98,9 +105,14 @@ impl Plugin for RenderPlugin {
             .add_asset::<Texture>()
             .add_asset::<Shader>()
             .add_asset::<PipelineDescriptor>()
+            .add_asset::<ComputePipelineDescriptor>()
+            .add_asset_loader::<Texture, HdrTextureLoader>()
+            .add_asset_loader::<Texture, ImageTextureLoader>()
             .register_component::<Camera>()
             .register_component::<Draw>()
+            .register_component::<Dispatch>()
             .register_component::<RenderPipelines>()
+            .register_component::<ComputePipelines>()
             .register_component::<OrthographicProjection>()
             .register_component::<PerspectiveProjection>()
             .register_component::<MainPass>()
@@ -111,17 +123,15 @@ impl Plugin for RenderPlugin {
             .register_property::<DynamicBinding>()
             .register_property::<PrimitiveTopology>()
             .register_properties::<PipelineSpecialization>()
+            .register_properties::<ComputePipelineSpecialization>()
             .init_resource::<RenderGraph>()
             .init_resource::<PipelineCompiler>()
+            .init_resource::<ComputePipelineCompiler>()
             .init_resource::<RenderResourceBindings>()
             .init_resource::<VertexBufferDescriptors>()
             .init_resource::<TextureResourceSystemState>()
             .init_resource::<AssetRenderResourceBindings>()
             .init_resource::<ActiveCameras>()
-            .add_system_to_stage(
-                bevy_app::stage::PRE_UPDATE,
-                draw::clear_draw_system.system(),
-            )
             .add_system_to_stage(
                 bevy_app::stage::POST_UPDATE,
                 camera::active_cameras_system.system(),
@@ -152,7 +162,16 @@ impl Plugin for RenderPlugin {
                 stage::RENDER_GRAPH_SYSTEMS,
                 render_graph::render_graph_schedule_executor_system.thread_local_system(),
             )
+            .add_system_to_stage(
+                stage::COMPUTE,
+                pipeline::dispatch_compute_pipelines_system.system(),
+            )
             .add_system_to_stage(stage::DRAW, pipeline::draw_render_pipelines_system.system())
+            .add_system_to_stage(stage::POST_RENDER, draw::clear_draw_system.system())
+            .add_system_to_stage(
+                stage::POST_RENDER,
+                dispatch::clear_compute_commands.system(),
+            )
             .add_system_to_stage(
                 stage::POST_RENDER,
                 shader::clear_shader_defs_system.system(),

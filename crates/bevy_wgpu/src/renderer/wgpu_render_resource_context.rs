@@ -117,6 +117,14 @@ impl WgpuRenderResourceContext {
             .iter()
             .map(|binding| {
                 let shader_stage = if binding.shader_stage
+                    == BindingShaderStage::VERTEX
+                        | BindingShaderStage::FRAGMENT
+                        | BindingShaderStage::COMPUTE
+                {
+                    wgpu::ShaderStage::VERTEX
+                        | wgpu::ShaderStage::FRAGMENT
+                        | wgpu::ShaderStage::COMPUTE
+                } else if binding.shader_stage
                     == BindingShaderStage::VERTEX | BindingShaderStage::FRAGMENT
                 {
                     wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT
@@ -124,6 +132,8 @@ impl WgpuRenderResourceContext {
                     wgpu::ShaderStage::VERTEX
                 } else if binding.shader_stage == BindingShaderStage::FRAGMENT {
                     wgpu::ShaderStage::FRAGMENT
+                } else if binding.shader_stage == BindingShaderStage::COMPUTE {
+                    wgpu::ShaderStage::COMPUTE
                 } else {
                     panic!("Invalid binding shader stage.")
                 };
@@ -433,6 +443,66 @@ impl RenderResourceContext for WgpuRenderResourceContext {
             .create_render_pipeline(&render_pipeline_descriptor);
         let mut render_pipelines = self.resources.render_pipelines.write();
         render_pipelines.insert(pipeline_handle, render_pipeline);
+    }
+
+    fn create_compute_pipeline(
+        &self,
+        pipeline_handle: Handle<bevy_render::pipeline::ComputePipelineDescriptor>,
+        pipeline_descriptor: &bevy_render::pipeline::ComputePipelineDescriptor,
+        shaders: &Assets<Shader>,
+    ) {
+        if self
+            .resources
+            .compute_pipelines
+            .read()
+            .get(&pipeline_handle)
+            .is_some()
+        {
+            return;
+        }
+
+        let layout = pipeline_descriptor.get_layout().unwrap();
+        for bind_group_descriptor in layout.bind_groups.iter() {
+            self.create_bind_group_layout(&bind_group_descriptor);
+        }
+
+        let bind_group_layouts = self.resources.bind_group_layouts.read();
+        // setup and collect bind group layouts
+        let bind_group_layouts = layout
+            .bind_groups
+            .iter()
+            .map(|bind_group| bind_group_layouts.get(&bind_group.id).unwrap())
+            .collect::<Vec<&wgpu::BindGroupLayout>>();
+
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: bind_group_layouts.as_slice(),
+                push_constant_ranges: &[],
+            });
+
+        self.create_shader_module(pipeline_descriptor.shader_stages.compute, shaders);
+
+        let shader_modules = self.resources.shader_modules.read();
+        let compute_shader_module = shader_modules
+            .get(&pipeline_descriptor.shader_stages.compute)
+            .unwrap();
+
+        let compute_pipeline_descriptor = wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&pipeline_layout),
+            compute_stage: wgpu::ProgrammableStageDescriptor {
+                module: &compute_shader_module,
+                entry_point: "main",
+            },
+        };
+
+        let compute_pipeline = self
+            .device
+            .create_compute_pipeline(&compute_pipeline_descriptor);
+        let mut compute_pipelines = self.resources.compute_pipelines.write();
+        compute_pipelines.insert(pipeline_handle, compute_pipeline);
     }
 
     fn bind_group_descriptor_exists(

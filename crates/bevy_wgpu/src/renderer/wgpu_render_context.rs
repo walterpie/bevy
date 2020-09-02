@@ -1,9 +1,12 @@
 use super::WgpuRenderResourceContext;
-use crate::{wgpu_type_converter::WgpuInto, WgpuRenderPass, WgpuResourceRefs};
+use crate::{
+    wgpu_compute_pass::WgpuComputePass, wgpu_type_converter::WgpuInto, WgpuRenderPass,
+    WgpuResourceRefs,
+};
 
 use bevy_render::{
     pass::{
-        PassDescriptor, RenderPass, RenderPassColorAttachmentDescriptor,
+        ComputePass, PassDescriptor, RenderPass, RenderPassColorAttachmentDescriptor,
         RenderPassDepthStencilAttachmentDescriptor, TextureAttachment,
     },
     renderer::{
@@ -152,6 +155,28 @@ impl RenderContext for WgpuRenderContext {
 
         self.command_encoder.set(encoder);
     }
+
+    fn begin_compute_pass(&mut self, run_pass: &mut dyn Fn(&mut dyn ComputePass)) {
+        if !self.command_encoder.is_some() {
+            self.command_encoder.create(&self.device);
+        }
+        let resource_lock = self.render_resource_context.resources.read();
+        let refs = resource_lock.refs();
+        let mut encoder = self.command_encoder.take().unwrap();
+        {
+            let compute_pass = create_compute_pass(&mut encoder);
+            let mut wgpu_compute_pass = WgpuComputePass {
+                compute_pass,
+                render_context: self,
+                wgpu_resources: refs,
+                pipeline_descriptor: None,
+            };
+
+            run_pass(&mut wgpu_compute_pass);
+        }
+
+        self.command_encoder.set(encoder);
+    }
 }
 
 pub fn create_render_pass<'a, 'b>(
@@ -176,6 +201,10 @@ pub fn create_render_pass<'a, 'b>(
             )
         }),
     })
+}
+
+pub fn create_compute_pass(encoder: &mut wgpu::CommandEncoder) -> wgpu::ComputePass {
+    encoder.begin_compute_pass()
 }
 
 fn get_texture_view<'a>(

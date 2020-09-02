@@ -142,7 +142,7 @@ impl Shader {
     }
 }
 
-/// All stages in a shader program
+/// Vertex and fragment stages in a shader program
 #[derive(Clone, Debug)]
 pub struct ShaderStages {
     pub vertex: Handle<Shader>,
@@ -154,6 +154,20 @@ impl ShaderStages {
         ShaderStages {
             vertex: vertex_shader,
             fragment: None,
+        }
+    }
+}
+
+/// Compute stages in a shader program
+#[derive(Clone, Debug)]
+pub struct ComputeShaderStages {
+    pub compute: Handle<Shader>,
+}
+
+impl ComputeShaderStages {
+    pub fn new(compute_shader: Handle<Shader>) -> Self {
+        Self {
+            compute: compute_shader,
         }
     }
 }
