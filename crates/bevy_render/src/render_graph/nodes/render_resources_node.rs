@@ -428,7 +428,7 @@ fn render_resources_node_system<T: RenderResources>(
     mut state: Local<RenderResourcesNodeState<Entity, T>>,
     render_resource_context: Res<Box<dyn RenderResourceContext>>,
     mut query: Query<(Entity, &T, &Draw, &mut RenderPipelines)>,
-    mut query2: Query<(&T, &Dispatch, &mut ComputePipelines)>,
+    mut query2: Query<(Entity, &T, &Dispatch, &mut ComputePipelines)>,
 ) {
     let state = state.deref_mut();
     let uniform_buffer_arrays = &mut state.uniform_buffer_arrays;
@@ -443,20 +443,6 @@ fn render_resources_node_system<T: RenderResources>(
         uniform_buffer_arrays.remove_bindings(*entity);
     }
 
-    // update uniforms info
-    for (uniforms, _dispatch, _compute_pipelines) in &mut query2.iter() {
-        state
-            .uniform_buffer_arrays
-            .increment_changed_item_counts(&uniforms);
-    }
-
-    state
-        .uniform_buffer_arrays
-        .setup_buffer_arrays(render_resource_context, state.dynamic_uniforms);
-    state
-        .uniform_buffer_arrays
-        .update_staging_buffer(render_resource_context);
-
     for (entity, uniforms, draw, mut render_pipelines) in &mut query.iter() {
         if !draw.is_visible {
             continue;
@@ -467,6 +453,23 @@ fn render_resources_node_system<T: RenderResources>(
             &uniforms,
             render_resource_context,
             &mut render_pipelines.bindings,
+        )
+    }
+    
+    if let Some((_, first, _, _)) = query2.iter().iter().next() {
+        uniform_buffer_arrays.initialize(first);
+    }
+
+    for entity in query2.removed::<T>() {
+        uniform_buffer_arrays.remove_bindings(*entity);
+    }
+
+    for (entity, uniforms, _, mut compute_pipelines) in &mut query2.iter() {
+        uniform_buffer_arrays.prepare_uniform_buffers(entity, uniforms);
+        setup_uniform_texture_resources::<T>(
+            &uniforms,
+            render_resource_context,
+            &mut compute_pipelines.bindings,
         )
     }
 
