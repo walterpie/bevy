@@ -1,10 +1,12 @@
 use super::Vertex;
 use crate::{
+    draw::DrawError,
     pipeline::{
-        AsVertexBufferDescriptor, IndexFormat, PrimitiveTopology, RenderPipelines,
-        VertexBufferDescriptor, VertexBufferDescriptors, VertexFormat,
+        AsVertexBufferDescriptor, IndexFormat, PipelineDescriptor, PrimitiveTopology,
+        RenderPipelines, VertexBufferDescriptor, VertexBufferDescriptors, VertexFormat,
     },
     renderer::{BufferInfo, BufferUsage, RenderResourceContext, RenderResourceId},
+    PipelineCompiler, PipelineSpecialization, Shader,
 };
 use bevy_app::prelude::{EventReader, Events};
 use bevy_asset::{AssetEvent, Assets, Handle};
@@ -486,7 +488,31 @@ fn remove_current_mesh_resources(
 #[derive(Default)]
 pub struct MeshResourceProviderState {
     mesh_event_reader: EventReader<AssetEvent<Mesh>>,
-    vertex_buffer_descriptor: Option<&'static VertexBufferDescriptor>,
+}
+
+fn prepare_pipeline<'a>(
+    pipelines: &'a mut Assets<PipelineDescriptor>,
+    shaders: &'a mut Assets<Shader>,
+    pipeline_compiler: &'a mut PipelineCompiler,
+    render_resource_context: &'a dyn RenderResourceContext,
+    vertex_buffer_descriptors: &'a mut VertexBufferDescriptors,
+    pipeline_handle: Handle<PipelineDescriptor>,
+    specialization: &PipelineSpecialization,
+) -> Result<Handle<PipelineDescriptor>, DrawError> {
+    if let Some(specialized_pipeline) =
+        pipeline_compiler.get_specialized_pipeline(pipeline_handle, specialization)
+    {
+        Ok(specialized_pipeline)
+    } else {
+        Ok(pipeline_compiler.prepare_pipeline(
+            render_resource_context,
+            pipelines,
+            shaders,
+            pipeline_handle,
+            vertex_buffer_descriptors,
+            specialization,
+        ))
+    }
 }
 
 pub fn mesh_resource_provider_system(
@@ -495,18 +521,11 @@ pub fn mesh_resource_provider_system(
     meshes: Res<Assets<Mesh>>,
     mut vertex_buffer_descriptors: ResMut<VertexBufferDescriptors>,
     mesh_events: Res<Events<AssetEvent<Mesh>>>,
+    mut pipeline_descriptors: ResMut<Assets<PipelineDescriptor>>,
+    mut shaders: ResMut<Assets<Shader>>,
+    mut pipeline_compiler: ResMut<PipelineCompiler>,
     mut query: Query<(&Handle<Mesh>, &mut RenderPipelines)>,
 ) {
-    let vertex_buffer_descriptor = match state.vertex_buffer_descriptor {
-        Some(value) => value,
-        None => {
-            // TODO: allow pipelines to specialize on vertex_buffer_descriptor and index_format
-            let vertex_buffer_descriptor = Vertex::as_vertex_buffer_descriptor();
-            vertex_buffer_descriptors.set(vertex_buffer_descriptor.clone());
-            state.vertex_buffer_descriptor = Some(vertex_buffer_descriptor);
-            vertex_buffer_descriptor
-        }
-    };
     let mut changed_meshes = HashSet::<Handle<Mesh>>::default();
     let render_resource_context = &**render_resource_context;
     for event in state.mesh_event_reader.iter(&mesh_events) {
@@ -529,8 +548,50 @@ pub fn mesh_resource_provider_system(
 
     for changed_mesh_handle in changed_meshes.iter() {
         if let Some(mesh) = meshes.get(changed_mesh_handle) {
+            let mut mesh_vertex_buffer_descriptor = None;
+            let mut mesh_index_format = None;
+
+            for (mesh, mut pipelines) in &mut query.iter() {
+                if mesh == changed_mesh_handle {
+                    for pipeline in &mut pipelines.pipelines {
+                        let specialized_pipeline_descriptor = prepare_pipeline(
+                            &mut pipeline_descriptors,
+                            &mut shaders,
+                            &mut pipeline_compiler,
+                            render_resource_context,
+                            &mut vertex_buffer_descriptors,
+                            pipeline.pipeline,
+                            &pipeline.specialization,
+                        )
+                        .unwrap();
+                        pipeline.pipeline = specialized_pipeline_descriptor;
+                        if let Some(pipeline) = pipeline_descriptors.get(&pipeline.pipeline) {
+                            // sanity check
+                            if let Some(format) = &mesh_index_format {
+                                debug_assert_eq!(format, &pipeline.index_format);
+                            }
+                            mesh_index_format = Some(pipeline.index_format);
+                            if let Some(layout) = &pipeline.layout {
+                                for vertex_buffer_descriptor in &layout.vertex_buffer_descriptors {
+                                    // sanity check
+                                    if let Some(descriptor) = &mesh_vertex_buffer_descriptor {
+                                        debug_assert_eq!(descriptor, vertex_buffer_descriptor);
+                                    }
+                                    mesh_vertex_buffer_descriptor =
+                                        Some(vertex_buffer_descriptor.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let vertex_bytes = mesh
-                .get_vertex_buffer_bytes(&vertex_buffer_descriptor)
+                .get_vertex_buffer_bytes(
+                    mesh_vertex_buffer_descriptor
+                        .as_ref()
+                        .unwrap_or_else(|| Vertex::as_vertex_buffer_descriptor()),
+                )
                 .unwrap();
             // TODO: use a staging buffer here
             let vertex_buffer = render_resource_context.create_buffer_with_data(
@@ -541,7 +602,9 @@ pub fn mesh_resource_provider_system(
                 &vertex_bytes,
             );
 
-            let index_bytes = mesh.get_index_buffer_bytes(IndexFormat::Uint16).unwrap();
+            let index_bytes = mesh
+                .get_index_buffer_bytes(mesh_index_format.unwrap_or_default())
+                .unwrap();
             let index_buffer = render_resource_context.create_buffer_with_data(
                 BufferInfo {
                     buffer_usage: BufferUsage::INDEX,
@@ -574,8 +637,20 @@ pub fn mesh_resource_provider_system(
         if let Some(RenderResourceId::Buffer(vertex_buffer)) =
             render_resource_context.get_asset_resource(*handle, VERTEX_BUFFER_ASSET_INDEX)
         {
+            let mut buffer_name = None;
+            'name: for pipeline in &mut render_pipelines.pipelines {
+                if let Some(pipeline) = pipeline_descriptors.get(&pipeline.pipeline) {
+                    if let Some(layout) = &pipeline.layout {
+                        if let Some(vertex_buffer_descriptor) = layout.vertex_buffer_descriptors.iter().next() {
+                            buffer_name = Some(vertex_buffer_descriptor.name.to_string());
+                            break 'name;
+                        }
+                    }
+                }
+            }
+
             render_pipelines.bindings.set_vertex_buffer(
-                "Vertex",
+                &buffer_name.unwrap_or_else(|| "Vertex".to_string()),
                 vertex_buffer,
                 render_resource_context
                     .get_asset_resource(*handle, INDEX_BUFFER_ASSET_INDEX)

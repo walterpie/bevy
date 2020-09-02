@@ -1,6 +1,6 @@
 use crate::{
     pipeline::{
-        PipelineCompiler, PipelineDescriptor, PipelineLayout, PipelineSpecialization,
+        IndexFormat, PipelineCompiler, PipelineDescriptor, PipelineLayout, PipelineSpecialization,
         VertexBufferDescriptors,
     },
     renderer::{
@@ -343,6 +343,7 @@ impl<'a> DrawContext<'a> {
             .pipelines
             .get(&pipeline)
             .ok_or_else(|| DrawError::NonExistentPipeline)?;
+        let index_format = pipeline_descriptor.index_format;
         let layout = pipeline_descriptor
             .get_layout()
             .ok_or_else(|| DrawError::PipelineHasNoLayout)?;
@@ -357,7 +358,11 @@ impl<'a> DrawContext<'a> {
                         if let Some(buffer_info) =
                             self.render_resource_context.get_buffer_info(index_buffer)
                         {
-                            indices = Some(0..(buffer_info.size / 2) as u32);
+                            let size = match index_format {
+                                IndexFormat::Uint16 => 2,
+                                IndexFormat::Uint32 => 4,
+                            };
+                            indices = Some(0..(buffer_info.size / size) as u32);
                         } else {
                             panic!("expected buffer type");
                         }
