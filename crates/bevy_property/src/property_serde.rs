@@ -25,6 +25,7 @@ impl<'a> Serializable<'a> {
         }
     }
 }
+
 pub struct PropertyValueSerializer<'a, T>
 where
     T: Property + Serialize,
@@ -111,9 +112,7 @@ impl<'a> MapSerializer<'a> {
 }
 
 fn format_type_name<'a>(registry: &'a PropertyTypeRegistry, type_name: &'a str) -> &'a str {
-    registry
-        .format_type_name(type_name)
-        .unwrap_or_else(|| type_name)
+    registry.format_type_name(type_name).unwrap_or(type_name)
 }
 
 impl<'a> Serialize for MapSerializer<'a> {
@@ -279,6 +278,7 @@ impl<'a, 'de> DeserializeSeed<'de> for PropertyDeserializer<'a> {
         }
     }
 }
+
 pub struct SeqPropertyDeserializer<'a> {
     registry: &'a PropertyTypeRegistry,
 }

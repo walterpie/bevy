@@ -159,6 +159,7 @@ pub const ENTITY_STRUCT: &str = "Entity";
 pub const ENTITY_FIELD_ENTITY: &str = "entity";
 pub const ENTITY_FIELD_COMPONENTS: &str = "components";
 
+#[derive(Debug)]
 struct SceneEntityVisiter<'a> {
     pub registry: &'a PropertyTypeRegistry,
 }
@@ -182,7 +183,7 @@ impl<'a, 'de> Visitor<'de> for SceneEntityVisiter<'a> {
                     if id.is_some() {
                         return Err(Error::duplicate_field(ENTITY_FIELD_ENTITY));
                     }
-                    id = Some(map.next_value::<u128>()?);
+                    id = Some(map.next_value::<u32>()?);
                 }
                 EntityField::Components => {
                     if components.is_some() {

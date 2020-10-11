@@ -8,6 +8,7 @@ use bevy_type_registry::RegisterType;
 use bevy_utils::HashMap;
 
 /// Events that happen on assets of type `T`
+#[derive(Debug)]
 pub enum AssetEvent<T: Resource> {
     Created { handle: Handle<T> },
     Modified { handle: Handle<T> },
@@ -15,6 +16,7 @@ pub enum AssetEvent<T: Resource> {
 }
 
 /// Stores Assets of a given type and tracks changes to them.
+#[derive(Debug)]
 pub struct Assets<T: Resource> {
     assets: HashMap<Handle<T>, T>,
     events: Events<AssetEvent<T>>,
@@ -119,6 +121,10 @@ pub trait AddAsset {
     where
         TLoader: AssetLoader<TAsset> + FromResources,
         TAsset: Send + Sync + 'static;
+    fn add_asset_loader_from_instance<TAsset, TLoader>(&mut self, instance: TLoader) -> &mut Self
+    where
+        TLoader: AssetLoader<TAsset> + FromResources,
+        TAsset: Send + Sync + 'static;
 }
 
 impl AddAsset for AppBuilder {
@@ -135,7 +141,7 @@ impl AddAsset for AppBuilder {
             .add_event::<AssetEvent<T>>()
     }
 
-    fn add_asset_loader<TAsset, TLoader>(&mut self) -> &mut Self
+    fn add_asset_loader_from_instance<TAsset, TLoader>(&mut self, instance: TLoader) -> &mut Self
     where
         TLoader: AssetLoader<TAsset> + FromResources,
         TAsset: Send + Sync + 'static,
@@ -156,7 +162,7 @@ impl AddAsset for AppBuilder {
                 .resources()
                 .get_mut::<AssetServer>()
                 .expect("AssetServer does not exist. Consider adding it as a resource.");
-            asset_server.add_loader(TLoader::from_resources(self.resources()));
+            asset_server.add_loader(instance);
             let handler = ChannelAssetHandler::new(
                 TLoader::from_resources(self.resources()),
                 asset_channel.sender.clone(),
@@ -164,5 +170,15 @@ impl AddAsset for AppBuilder {
             asset_server.add_handler(handler);
         }
         self
+    }
+
+    fn add_asset_loader<TAsset, TLoader>(&mut self) -> &mut Self
+    where
+        TLoader: AssetLoader<TAsset> + FromResources,
+        TAsset: Send + Sync + 'static,
+    {
+        self.add_asset_loader_from_instance::<TAsset, TLoader>(TLoader::from_resources(
+            self.resources(),
+        ))
     }
 }

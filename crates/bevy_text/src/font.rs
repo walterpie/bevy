@@ -5,6 +5,7 @@ use bevy_render::{
     texture::{Texture, TextureFormat},
 };
 
+#[derive(Debug)]
 pub struct Font {
     pub font: FontVec,
 }
@@ -30,9 +31,9 @@ impl Font {
         // TODO: make this texture grayscale
         let color = Color::WHITE;
         let color_u8 = [
-            (color.r * 255.0) as u8,
-            (color.g * 255.0) as u8,
-            (color.b * 255.0) as u8,
+            (color.r() * 255.0) as u8,
+            (color.g() * 255.0) as u8,
+            (color.b() * 255.0) as u8,
         ];
         Texture::new(
             Vec2::new(width as f32, height as f32),
@@ -43,7 +44,7 @@ impl Font {
                         color_u8[0],
                         color_u8[1],
                         color_u8[2],
-                        (color.a * a * 255.0) as u8,
+                        (color.a() * a * 255.0) as u8,
                     ]
                 })
                 .flatten()
@@ -75,9 +76,9 @@ impl Font {
         );
 
         let color_u8 = [
-            (color.r * 255.0) as u8,
-            (color.g * 255.0) as u8,
-            (color.b * 255.0) as u8,
+            (color.r() * 255.0) as u8,
+            (color.g() * 255.0) as u8,
+            (color.b() * 255.0) as u8,
         ];
 
         // TODO: this offset is a bit hackey
@@ -108,7 +109,7 @@ impl Font {
                         color_u8[0],
                         color_u8[1],
                         color_u8[2],
-                        (color.a * a * 255.0) as u8,
+                        (color.a() * a * 255.0) as u8,
                     ]
                 })
                 .flatten()

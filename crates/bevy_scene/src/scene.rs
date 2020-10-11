@@ -5,13 +5,14 @@ use bevy_property::{DynamicProperties, PropertyTypeRegistry};
 use bevy_type_registry::ComponentRegistry;
 use serde::Serialize;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Scene {
     pub entities: Vec<Entity>,
 }
 
+#[derive(Debug)]
 pub struct Entity {
-    pub entity: u128,
+    pub entity: u32,
     pub components: Vec<DynamicProperties>,
 }
 
@@ -23,7 +24,7 @@ impl Scene {
             for (index, entity) in archetype.iter_entities().enumerate() {
                 if index == entities.len() {
                     entities.push(Entity {
-                        entity: *entity,
+                        entity: entity.id(),
                         components: Vec::new(),
                     })
                 }
@@ -44,24 +45,21 @@ impl Scene {
     }
 
     // TODO: move to AssetSaver when it is implemented
-    pub fn serialize_ron(
-        &self,
-        registry: &PropertyTypeRegistry,
-    ) -> Result<String, bevy_ron::Error> {
+    pub fn serialize_ron(&self, registry: &PropertyTypeRegistry) -> Result<String, ron::Error> {
         serialize_ron(SceneSerializer::new(self, registry))
     }
 }
 
-pub fn serialize_ron<S>(serialize: S) -> Result<String, bevy_ron::Error>
+pub fn serialize_ron<S>(serialize: S) -> Result<String, ron::Error>
 where
     S: Serialize,
 {
-    let pretty_config = bevy_ron::ser::PrettyConfig::default()
-        .decimal_floats(true)
-        .indentor("  ".to_string())
-        .new_line("\n".to_string());
+    let pretty_config = ron::ser::PrettyConfig::default()
+        .with_decimal_floats(true)
+        .with_indentor("  ".to_string())
+        .with_new_line("\n".to_string());
     let mut buf = Vec::new();
-    let mut ron_serializer = bevy_ron::ser::Serializer::new(&mut buf, Some(pretty_config), false)?;
+    let mut ron_serializer = ron::ser::Serializer::new(&mut buf, Some(pretty_config), false)?;
     serialize.serialize(&mut ron_serializer)?;
     Ok(String::from_utf8(buf).unwrap())
 }

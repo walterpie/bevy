@@ -9,6 +9,7 @@ use rectangle_pack::{
 };
 use thiserror::Error;
 
+#[derive(Debug)]
 pub struct TextureAtlasBuilder {
     pub textures: Vec<Handle<Texture>>,
     pub rects_to_place: GroupedRectsToPlace<Handle<Texture>>,
@@ -110,7 +111,7 @@ impl TextureAtlasBuilder {
             }
         }
 
-        let rect_placements = rect_placements.ok_or_else(|| RectanglePackError::NotEnoughSpace)?;
+        let rect_placements = rect_placements.ok_or(RectanglePackError::NotEnoughSpace)?;
 
         let mut texture_rects = Vec::with_capacity(rect_placements.packed_locations().len());
         let mut texture_handles = HashMap::default();

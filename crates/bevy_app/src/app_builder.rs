@@ -1,5 +1,3 @@
-#[cfg(feature = "dynamic_plugins")]
-use crate::plugin::dynamically_load_plugin;
 use crate::{
     app::{App, AppExit},
     event::Events,
@@ -71,6 +69,28 @@ impl AppBuilder {
 
     pub fn add_startup_stage(&mut self, stage_name: &'static str) -> &mut Self {
         self.app.startup_schedule.add_stage(stage_name);
+        self
+    }
+
+    pub fn add_startup_stage_after(
+        &mut self,
+        target: &'static str,
+        stage_name: &'static str,
+    ) -> &mut Self {
+        self.app
+            .startup_schedule
+            .add_stage_after(target, stage_name);
+        self
+    }
+
+    pub fn add_startup_stage_before(
+        &mut self,
+        target: &'static str,
+        stage_name: &'static str,
+    ) -> &mut Self {
+        self.app
+            .startup_schedule
+            .add_stage_before(target, stage_name);
         self
     }
 
@@ -219,14 +239,6 @@ impl AppBuilder {
 
     pub fn set_runner(&mut self, run_fn: impl Fn(App) + 'static) -> &mut Self {
         self.app.runner = Box::new(run_fn);
-        self
-    }
-
-    #[cfg(feature = "dynamic_plugins")]
-    pub fn load_plugin(&mut self, path: &str) -> &mut Self {
-        let (_lib, plugin) = dynamically_load_plugin(path);
-        log::debug!("loaded plugin: {}", plugin.name());
-        plugin.build(self);
         self
     }
 

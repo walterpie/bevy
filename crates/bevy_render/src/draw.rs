@@ -36,7 +36,7 @@ pub enum RenderCommand {
     SetBindGroup {
         index: u32,
         bind_group: BindGroupId,
-        dynamic_uniform_indices: Option<Arc<Vec<u32>>>,
+        dynamic_uniform_indices: Option<Arc<[u32]>>,
     },
     DrawIndexed {
         indices: Range<u32>,
@@ -50,7 +50,7 @@ pub enum RenderCommand {
 }
 
 /// A component that indicates how to draw an entity.
-#[derive(Properties, Clone)]
+#[derive(Debug, Properties, Clone)]
 pub struct Draw {
     pub is_visible: bool,
     pub is_transparent: bool,
@@ -123,6 +123,7 @@ pub enum DrawError {
     BufferAllocationFailure,
 }
 
+//#[derive(Debug)]
 pub struct DrawContext<'a> {
     pub pipelines: ResMut<'a, Assets<PipelineDescriptor>>,
     pub shaders: ResMut<'a, Assets<Shader>>,
@@ -151,6 +152,7 @@ impl<'a> ResourceQuery for DrawContext<'a> {
     type Fetch = FetchDrawContext;
 }
 
+#[derive(Debug)]
 pub struct FetchDrawContext;
 
 // TODO: derive this impl
@@ -176,14 +178,28 @@ impl<'a> FetchResource<'a> for FetchDrawContext {
     }
 
     unsafe fn get(resources: &'a Resources, _system_id: Option<SystemId>) -> Self::Item {
+        let pipelines = {
+            let (value, type_state) = resources
+                .get_unsafe_ref_with_type_state::<Assets<PipelineDescriptor>>(
+                    ResourceIndex::Global,
+                );
+            ResMut::new(value, type_state.mutated())
+        };
+        let shaders = {
+            let (value, type_state) =
+                resources.get_unsafe_ref_with_type_state::<Assets<Shader>>(ResourceIndex::Global);
+            ResMut::new(value, type_state.mutated())
+        };
+        let pipeline_compiler = {
+            let (value, type_state) =
+                resources.get_unsafe_ref_with_type_state::<PipelineCompiler>(ResourceIndex::Global);
+            ResMut::new(value, type_state.mutated())
+        };
+
         DrawContext {
-            pipelines: ResMut::new(
-                resources.get_unsafe_ref::<Assets<PipelineDescriptor>>(ResourceIndex::Global),
-            ),
-            shaders: ResMut::new(resources.get_unsafe_ref::<Assets<Shader>>(ResourceIndex::Global)),
-            pipeline_compiler: ResMut::new(
-                resources.get_unsafe_ref::<PipelineCompiler>(ResourceIndex::Global),
-            ),
+            pipelines,
+            shaders,
+            pipeline_compiler,
             render_resource_context: Res::new(
                 resources.get_unsafe_ref::<Box<dyn RenderResourceContext>>(ResourceIndex::Global),
             ),
@@ -230,7 +246,7 @@ impl<'a> DrawContext<'a> {
     ) -> Result<RenderResourceBinding, DrawError> {
         self.shared_buffers
             .get_buffer(render_resource, buffer_usage)
-            .ok_or_else(|| DrawError::BufferAllocationFailure)
+            .ok_or(DrawError::BufferAllocationFailure)
     }
 
     pub fn set_pipeline(
@@ -263,14 +279,14 @@ impl<'a> DrawContext<'a> {
     pub fn get_pipeline_descriptor(&self) -> Result<&PipelineDescriptor, DrawError> {
         self.current_pipeline
             .and_then(|handle| self.pipelines.get(&handle))
-            .ok_or_else(|| DrawError::NoPipelineSet)
+            .ok_or(DrawError::NoPipelineSet)
     }
 
     pub fn get_pipeline_layout(&self) -> Result<&PipelineLayout, DrawError> {
         self.get_pipeline_descriptor().and_then(|descriptor| {
             descriptor
                 .get_layout()
-                .ok_or_else(|| DrawError::PipelineHasNoLayout)
+                .ok_or(DrawError::PipelineHasNoLayout)
         })
     }
 
@@ -279,16 +295,14 @@ impl<'a> DrawContext<'a> {
         draw: &mut Draw,
         render_resource_bindings: &mut [&mut RenderResourceBindings],
     ) -> Result<(), DrawError> {
-        let pipeline = self
-            .current_pipeline
-            .ok_or_else(|| DrawError::NoPipelineSet)?;
+        let pipeline = self.current_pipeline.ok_or(DrawError::NoPipelineSet)?;
         let pipeline_descriptor = self
             .pipelines
             .get(&pipeline)
-            .ok_or_else(|| DrawError::NonExistentPipeline)?;
+            .ok_or(DrawError::NonExistentPipeline)?;
         let layout = pipeline_descriptor
             .get_layout()
-            .ok_or_else(|| DrawError::PipelineHasNoLayout)?;
+            .ok_or(DrawError::PipelineHasNoLayout)?;
         for bindings in render_resource_bindings.iter_mut() {
             bindings.update_bind_groups(pipeline_descriptor, &**self.render_resource_context);
         }
@@ -311,16 +325,14 @@ impl<'a> DrawContext<'a> {
         index: u32,
         bind_group: &BindGroup,
     ) -> Result<(), DrawError> {
-        let pipeline = self
-            .current_pipeline
-            .ok_or_else(|| DrawError::NoPipelineSet)?;
+        let pipeline = self.current_pipeline.ok_or(DrawError::NoPipelineSet)?;
         let pipeline_descriptor = self
             .pipelines
             .get(&pipeline)
-            .ok_or_else(|| DrawError::NonExistentPipeline)?;
+            .ok_or(DrawError::NonExistentPipeline)?;
         let layout = pipeline_descriptor
             .get_layout()
-            .ok_or_else(|| DrawError::PipelineHasNoLayout)?;
+            .ok_or(DrawError::PipelineHasNoLayout)?;
         let bind_group_descriptor = &layout.bind_groups[index as usize];
         self.render_resource_context
             .create_bind_group(bind_group_descriptor.id, bind_group);
@@ -331,18 +343,15 @@ impl<'a> DrawContext<'a> {
         &self,
         draw: &mut Draw,
         render_resource_bindings: &[&RenderResourceBindings],
-    ) -> Result<Option<Range<u32>>, DrawError> {
-        let mut indices = None;
-        let pipeline = self
-            .current_pipeline
-            .ok_or_else(|| DrawError::NoPipelineSet)?;
+    ) -> Result<(), DrawError> {
+        let pipeline = self.current_pipeline.ok_or(DrawError::NoPipelineSet)?;
         let pipeline_descriptor = self
             .pipelines
             .get(&pipeline)
-            .ok_or_else(|| DrawError::NonExistentPipeline)?;
+            .ok_or(DrawError::NonExistentPipeline)?;
         let layout = pipeline_descriptor
             .get_layout()
-            .ok_or_else(|| DrawError::PipelineHasNoLayout)?;
+            .ok_or(DrawError::PipelineHasNoLayout)?;
         for (slot, vertex_buffer_descriptor) in layout.vertex_buffer_descriptors.iter().enumerate()
         {
             for bindings in render_resource_bindings.iter() {
@@ -351,13 +360,6 @@ impl<'a> DrawContext<'a> {
                 {
                     draw.set_vertex_buffer(slot as u32, vertex_buffer, 0);
                     if let Some(index_buffer) = index_buffer {
-                        if let Some(buffer_info) =
-                            self.render_resource_context.get_buffer_info(index_buffer)
-                        {
-                            indices = Some(0..(buffer_info.size / 2) as u32);
-                        } else {
-                            panic!("expected buffer type");
-                        }
                         draw.set_index_buffer(index_buffer, 0);
                     }
 
@@ -365,8 +367,7 @@ impl<'a> DrawContext<'a> {
                 }
             }
         }
-
-        Ok(indices)
+        Ok(())
     }
 }
 

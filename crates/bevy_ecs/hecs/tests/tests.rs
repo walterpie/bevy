@@ -165,51 +165,12 @@ fn dynamic_components() {
 }
 
 #[test]
-#[should_panic(expected = "already borrowed")]
-fn illegal_borrow() {
-    let mut world = World::new();
-    world.spawn(("abc", 123));
-    world.spawn(("def", 456));
-
-    world.query::<(&mut i32, &i32)>().iter();
-}
-
-#[test]
-#[should_panic(expected = "already borrowed")]
-fn illegal_borrow_2() {
-    let mut world = World::new();
-    world.spawn(("abc", 123));
-    world.spawn(("def", 456));
-
-    world.query::<(&mut i32, &mut i32)>().iter();
-}
-
-#[test]
-fn disjoint_queries() {
-    let mut world = World::new();
-    world.spawn(("abc", true));
-    world.spawn(("def", 456));
-
-    let _a = world.query::<(&mut &str, &bool)>();
-    let _b = world.query::<(&mut &str, &i32)>();
-}
-
-#[test]
 fn shared_borrow() {
     let mut world = World::new();
     world.spawn(("abc", 123));
     world.spawn(("def", 456));
 
     world.query::<(&i32, &i32)>();
-}
-
-#[test]
-#[should_panic(expected = "already borrowed")]
-fn illegal_random_access() {
-    let mut world = World::new();
-    let e = world.spawn(("abc", 123));
-    let _borrow = world.get_mut::<i32>(e).unwrap();
-    world.get::<i32>(e).unwrap();
 }
 
 #[test]
@@ -267,7 +228,7 @@ fn alias() {
     let mut world = World::new();
     world.spawn(("abc", 123));
     world.spawn(("def", 456, true));
-    let mut q = world.query::<&mut i32>();
+    let mut q = world.query_mut::<Entity>();
     let _a = q.iter().collect::<Vec<_>>();
     let _b = q.iter().collect::<Vec<_>>();
 }
@@ -403,4 +364,36 @@ fn remove_tracking() {
         &[b],
         "world clears result in 'removed component' states"
     );
+}
+
+#[test]
+fn added_tracking() {
+    let mut world = World::new();
+    let a = world.spawn((123,));
+
+    assert_eq!(world.query::<&i32>().iter().count(), 1);
+    assert_eq!(world.query::<Added<i32>>().iter().count(), 1);
+    assert_eq!(world.query_mut::<&i32>().iter().count(), 1);
+    assert_eq!(world.query_mut::<Added<i32>>().iter().count(), 1);
+    assert!(world.query_one::<&i32>(a).unwrap().get().is_some());
+    assert!(world.query_one::<Added<i32>>(a).unwrap().get().is_some());
+    assert!(world.query_one_mut::<&i32>(a).unwrap().get().is_some());
+    assert!(world
+        .query_one_mut::<Added<i32>>(a)
+        .unwrap()
+        .get()
+        .is_some());
+
+    world.clear_trackers();
+
+    assert_eq!(world.query::<&i32>().iter().count(), 1);
+    assert_eq!(world.query::<Added<i32>>().iter().count(), 0);
+    assert_eq!(world.query_mut::<&i32>().iter().count(), 1);
+    assert_eq!(world.query_mut::<Added<i32>>().iter().count(), 0);
+    assert!(world.query_one_mut::<&i32>(a).unwrap().get().is_some());
+    assert!(world
+        .query_one_mut::<Added<i32>>(a)
+        .unwrap()
+        .get()
+        .is_none());
 }

@@ -8,6 +8,7 @@ use parking_lot::RwLock;
 use serde::de::DeserializeSeed;
 use std::{path::Path, sync::Arc};
 
+#[derive(Debug)]
 pub struct SceneLoader {
     property_type_registry: Arc<RwLock<PropertyTypeRegistry>>,
 }
@@ -24,7 +25,7 @@ impl FromResources for SceneLoader {
 impl AssetLoader<Scene> for SceneLoader {
     fn from_bytes(&self, _asset_path: &Path, bytes: Vec<u8>) -> Result<Scene> {
         let registry = self.property_type_registry.read();
-        let mut deserializer = bevy_ron::de::Deserializer::from_bytes(&bytes)?;
+        let mut deserializer = ron::de::Deserializer::from_bytes(&bytes)?;
         let scene_deserializer = SceneDeserializer {
             property_type_registry: &registry,
         };

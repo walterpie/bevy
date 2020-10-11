@@ -4,19 +4,39 @@ use crate::{
 };
 use bevy_hecs::World;
 use bevy_utils::{HashMap, HashSet};
-use parking_lot::Mutex;
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, fmt};
 
 /// An ordered collection of stages, which each contain an ordered list of [System]s.
 /// Schedules are essentially the "execution plan" for an App's systems.
 /// They are run on a given [World] and [Resources] reference.
 #[derive(Default)]
 pub struct Schedule {
-    pub(crate) stages: HashMap<Cow<'static, str>, Vec<Arc<Mutex<Box<dyn System>>>>>,
+    pub(crate) stages: HashMap<Cow<'static, str>, Vec<Box<dyn System>>>,
     pub(crate) stage_order: Vec<Cow<'static, str>>,
     pub(crate) system_ids: HashSet<SystemId>,
     generation: usize,
     last_initialize_generation: usize,
+}
+
+impl fmt::Debug for Schedule {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "Schedule {{")?;
+
+        let stages = self
+            .stage_order
+            .iter()
+            .map(|s| (s, self.stages[s].iter().map(|s| (s.name(), s.id()))));
+
+        for (stage, syss) in stages {
+            writeln!(f, "    Stage \"{}\"", stage)?;
+
+            for (name, id) in syss {
+                writeln!(f, "        System {{ name: \"{}\", id: {:?} }}", name, id)?;
+            }
+        }
+
+        writeln!(f, "}}")
+    }
 }
 
 impl Schedule {
@@ -94,7 +114,7 @@ impl Schedule {
             );
         }
         self.system_ids.insert(system.id());
-        systems.push(Arc::new(Mutex::new(system)));
+        systems.push(system);
 
         self.generation += 1;
         self
@@ -118,7 +138,7 @@ impl Schedule {
             );
         }
         self.system_ids.insert(system.id());
-        systems.insert(0, Arc::new(Mutex::new(system)));
+        systems.insert(0, system);
 
         self.generation += 1;
         self
@@ -128,7 +148,6 @@ impl Schedule {
         for stage_name in self.stage_order.iter() {
             if let Some(stage_systems) = self.stages.get_mut(stage_name) {
                 for system in stage_systems.iter_mut() {
-                    let mut system = system.lock();
                     #[cfg(feature = "profiler")]
                     crate::profiler_start(resources, system.name().clone());
                     system.update_archetype_access(world);
@@ -147,7 +166,6 @@ impl Schedule {
                 // "flush"
                 // NOTE: when this is made parallel a full sync is required here
                 for system in stage_systems.iter_mut() {
-                    let mut system = system.lock();
                     match system.thread_local_execution() {
                         ThreadLocalExecution::NextFlush => {
                             system.run_thread_local(world, resources)
@@ -159,18 +177,18 @@ impl Schedule {
         }
 
         world.clear_trackers();
+        resources.clear_trackers();
     }
 
     // TODO: move this code to ParallelExecutor
-    pub fn initialize(&mut self, resources: &mut Resources) {
+    pub fn initialize(&mut self, world: &mut World, resources: &mut Resources) {
         if self.last_initialize_generation == self.generation {
             return;
         }
 
         for stage in self.stages.values_mut() {
             for system in stage.iter_mut() {
-                let mut system = system.lock();
-                system.initialize(resources);
+                system.initialize(world, resources);
             }
         }
 

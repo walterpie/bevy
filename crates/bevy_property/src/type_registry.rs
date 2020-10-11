@@ -1,8 +1,8 @@
 use crate::{DeserializeProperty, Property};
 use bevy_utils::{HashMap, HashSet};
-use std::any::TypeId;
+use std::{any::TypeId, fmt};
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct PropertyTypeRegistry {
     registrations: HashMap<String, PropertyTypeRegistration>,
     short_names: HashMap<String, String>,
@@ -72,6 +72,24 @@ pub struct PropertyTypeRegistration {
     pub name: &'static str,
 }
 
+impl fmt::Debug for PropertyTypeRegistration {
+    fn fmt<'a>(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("PropertyTypeRegistration")
+            .field("ty", &self.ty)
+            .field(
+                "deserialize_fn",
+                &(self.deserialize_fn
+                    as fn(
+                        deserializer: &'a mut dyn erased_serde::Deserializer<'a>,
+                        property_type_registry: &'a PropertyTypeRegistry,
+                    ) -> Result<Box<dyn Property>, erased_serde::Error>),
+            )
+            .field("short_name", &self.short_name)
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
 impl PropertyTypeRegistration {
     pub fn of<T: Property + DeserializeProperty>() -> Self {
         let ty = TypeId::of::<T>();
@@ -89,34 +107,39 @@ impl PropertyTypeRegistration {
     }
 
     pub fn get_short_name(full_name: &str) -> String {
-        let mut split = full_name.splitn(2, '<');
+        let mut short_name = String::new();
 
-        // main type
-        let mut short_name = split
-            .next()
-            .unwrap()
-            .split("::")
-            .last()
-            .unwrap()
-            .to_string();
-
-        // process generics if they exist
-        if let Some(generics) = split.next() {
-            if !generics.ends_with('>') {
-                panic!("should end with closing carrot")
+        {
+            // A typename may be a composition of several other type names (e.g. generic parameters)
+            // separated by the characters that we try to find below.
+            // Then, each individual typename is shortened to its last path component.
+            //
+            // Note: Instead of `find`, `split_inclusive` would be nice but it's still unstable...
+            let mut remainder = full_name;
+            while let Some(index) = remainder.find(&['<', '>', '(', ')', '[', ']', ',', ';'][..]) {
+                let (path, new_remainder) = remainder.split_at(index);
+                // Push the shortened path in front of the found character
+                short_name.push_str(path.rsplit(':').next().unwrap());
+                // Push the character that was found
+                let character = new_remainder.chars().next().unwrap();
+                short_name.push(character);
+                // Advance the remainder
+                if character == ',' || character == ';' {
+                    // A comma or semicolon is always followed by a space
+                    short_name.push(' ');
+                    remainder = &new_remainder[2..];
+                } else {
+                    remainder = &new_remainder[1..];
+                }
             }
 
-            let generics = &generics[0..generics.len() - 1];
-            short_name.push('<');
-            short_name.push_str(
-                &generics
-                    .split(',')
-                    .map(|generic| Self::get_short_name(generic.trim()))
-                    .collect::<Vec<String>>()
-                    .join(", "),
-            );
-            short_name.push('>');
+            // The remainder will only be non-empty if there were no matches at all
+            if !remainder.is_empty() {
+                // Then, the full typename is a path that has to be shortened
+                short_name.push_str(remainder.rsplit(':').next().unwrap());
+            }
         }
+
         short_name
     }
 
@@ -131,5 +154,81 @@ impl PropertyTypeRegistration {
         let mut erased = erased_serde::Deserializer::erase(deserializer);
         (self.deserialize_fn)(&mut erased, registry)
             .map_err(<<D as serde::Deserializer<'de>>::Error as serde::de::Error>::custom)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::PropertyTypeRegistration;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_get_short_name() {
+        assert_eq!(
+            PropertyTypeRegistration::get_short_name(std::any::type_name::<f64>()),
+            "f64"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::get_short_name(std::any::type_name::<String>()),
+            "String"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::get_short_name(std::any::type_name::<(u32, f64)>()),
+            "(u32, f64)"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::get_short_name(std::any::type_name::<(String, String)>()),
+            "(String, String)"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::get_short_name(std::any::type_name::<[f64]>()),
+            "[f64]"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::get_short_name(std::any::type_name::<[String]>()),
+            "[String]"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::get_short_name(std::any::type_name::<[f64; 16]>()),
+            "[f64; 16]"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::get_short_name(std::any::type_name::<[String; 16]>()),
+            "[String; 16]"
+        );
+    }
+
+    #[test]
+    fn test_property_type_registration() {
+        assert_eq!(
+            PropertyTypeRegistration::of::<Option<f64>>().short_name,
+            "Option<f64>"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::of::<HashMap<u32, String>>().short_name,
+            "HashMap<u32, String>"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::of::<Option<HashMap<u32, String>>>().short_name,
+            "Option<HashMap<u32, String>>"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::of::<Option<HashMap<u32, Option<String>>>>().short_name,
+            "Option<HashMap<u32, Option<String>>>"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::of::<Option<HashMap<String, Option<String>>>>().short_name,
+            "Option<HashMap<String, Option<String>>>"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::of::<Option<HashMap<Option<String>, Option<String>>>>()
+                .short_name,
+            "Option<HashMap<Option<String>, Option<String>>>"
+        );
+        assert_eq!(
+            PropertyTypeRegistration::of::<Option<HashMap<Option<String>, (String, Option<String>)>>>()
+                .short_name,
+            "Option<HashMap<Option<String>, (String, Option<String>)>>"
+        );
     }
 }

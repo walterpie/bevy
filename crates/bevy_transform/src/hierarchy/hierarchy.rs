@@ -39,14 +39,15 @@ where
     previous_result
 }
 
+#[derive(Debug)]
 pub struct DespawnRecursive {
     entity: Entity,
 }
 
 fn despawn_with_children_recursive(world: &mut World, entity: Entity) {
     // first, make the entity's own parent forget about it
-    if let Ok(parent) = world.get::<Parent>(entity) {
-        if let Ok(mut children) = world.get_mut::<Children>(parent.0) {
+    if let Ok(parent) = world.get::<Parent>(entity).map(|parent| parent.0) {
+        if let Ok(mut children) = world.get_mut::<Children>(parent) {
             children.retain(|c| *c != entity);
         }
     }
@@ -66,7 +67,9 @@ fn despawn_with_children_recursive_inner(world: &mut World, entity: Entity) {
         }
     }
 
-    world.despawn(entity).unwrap();
+    if let Err(e) = world.despawn(entity) {
+        log::debug!("Failed to despawn entity {:?}: {}", entity, e);
+    }
 }
 
 impl WorldWriter for DespawnRecursive {
@@ -98,6 +101,7 @@ mod tests {
         let mut world = World::default();
         let mut resources = Resources::default();
         let mut command_buffer = Commands::default();
+        command_buffer.set_entity_reserver(world.get_entity_reserver());
 
         command_buffer.spawn((0u32, 0u64)).with_children(|parent| {
             parent.spawn((0u32, 0u64));
@@ -126,6 +130,7 @@ mod tests {
         let parent_entity = world.get::<Children>(grandparent_entity).unwrap()[0];
 
         command_buffer.despawn_recursive(parent_entity);
+        command_buffer.despawn_recursive(parent_entity); // despawning the same entity twice should not panic
         command_buffer.apply(&mut world, &mut resources);
 
         let results = world
